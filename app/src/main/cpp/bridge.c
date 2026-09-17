@@ -6,6 +6,9 @@
 #include <unistd.h>
 #include <limits.h>
 #include <sys/stat.h>
+#include <dirent.h>
+#include <regex.h>
+#include "xtimer.h"
 #include "3rd/minilua.h"
 
 /* xlog already writes to logcat. Do not forward potentially sensitive logs to UI. */
@@ -59,9 +62,7 @@ static int inside_workspace(const char *path) {
 
 /* Check every existing component, including symlinks. Missing components are
  * permitted for Write; traversal is rejected before any file tool executes. */
-static int check_path(lua_State *L) {
-    size_t len;
-    const char *input = luaL_checklstring(L, 1, &len);
+static int path_allowed(const char *input, size_t len) {
     char path[PATH_MAX], resolved[PATH_MAX];
     if (len == 0 || len >= PATH_MAX || memchr(input, 0, len)) goto denied;
     int count = input[0] == '/' ? snprintf(path, sizeof(path), "%s", input)
@@ -82,16 +83,94 @@ static int check_path(lua_State *L) {
         if (!end) break;
         *end = '/'; part = end;
     }
-    lua_pushboolean(L, 1); return 1;
+    return 1;
 denied:
-    lua_pushboolean(L, 0); return 1;
+    return 0;
+}
+
+static int check_path(lua_State *L) {
+    size_t len;
+    const char *input = luaL_checklstring(L, 1, &len);
+    lua_pushboolean(L, path_allowed(input, len));
+    return 1;
+}
+
+/* Directory traversal never follows symlinks, including after an approved shell
+ * command creates one. Recursion and cancellation are handled by Lua. */
+static int list_dir(lua_State *L) {
+    size_t len;
+    const char *input = luaL_checklstring(L, 1, &len);
+    if (!path_allowed(input, len)) return luaL_error(L, "outside workspace");
+    char path[PATH_MAX];
+    if (input[0] == '/') snprintf(path, sizeof(path), "%s", input);
+    else snprintf(path, sizeof(path), "%s/%s", workspace, input);
+    DIR *dir = opendir(path);
+    if (!dir) { lua_pushnil(L); lua_pushliteral(L, "cannot open directory"); return 2; }
+    lua_newtable(L);
+    struct dirent *entry;
+    int index = 1;
+    while ((entry = readdir(dir)) != NULL && index <= 10000) {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
+        char full[PATH_MAX];
+        if (snprintf(full, sizeof(full), "%s/%s", path, entry->d_name) >= PATH_MAX) continue;
+        struct stat st;
+        if (lstat(full, &st) || S_ISLNK(st.st_mode) || (!S_ISREG(st.st_mode) && !S_ISDIR(st.st_mode))) continue;
+        lua_newtable(L);
+        lua_pushstring(L, full); lua_setfield(L, -2, "path");
+        lua_pushstring(L, entry->d_name); lua_setfield(L, -2, "name");
+        lua_pushboolean(L, S_ISDIR(st.st_mode)); lua_setfield(L, -2, "is_dir");
+        lua_pushinteger(L, st.st_size); lua_setfield(L, -2, "size");
+        lua_rawseti(L, -2, index++);
+    }
+    closedir(dir);
+    return 1;
+}
+
+typedef struct { regex_t regex; int valid; } Regex;
+static int regex_gc(lua_State *L) {
+    Regex *r = luaL_checkudata(L, 1, "codua2a.regex");
+    if (r->valid) { regfree(&r->regex); r->valid = 0; }
+    return 0;
+}
+static int regex_match(lua_State *L) {
+    Regex *r = luaL_checkudata(L, 1, "codua2a.regex");
+    const char *text = luaL_checkstring(L, 2);
+    lua_pushboolean(L, r->valid && regexec(&r->regex, text, 0, NULL, 0) == 0);
+    return 1;
+}
+static int compile_regex(lua_State *L) {
+    size_t len;
+    const char *pattern = luaL_checklstring(L, 1, &len);
+    if (len > 1024 || memchr(pattern, 0, len)) return luaL_error(L, "invalid or oversized regex");
+    int flags = REG_EXTENDED | REG_NOSUB | (lua_toboolean(L, 2) ? REG_ICASE : 0);
+    Regex *r = lua_newuserdata(L, sizeof(*r));
+    r->valid = 0;
+    luaL_setmetatable(L, "codua2a.regex");
+    int rc = regcomp(&r->regex, pattern, flags);
+    if (rc) { char error[256]; regerror(rc, &r->regex, error, sizeof(error)); return luaL_error(L, "%s", error); }
+    r->valid = 1;
+    return 1;
+}
+static int now_ms(lua_State *L) { lua_pushinteger(L, (lua_Integer)time_clock_ms()); return 1; }
+
+static void register_regex(lua_State *L) {
+    luaL_newmetatable(L, "codua2a.regex");
+    lua_pushcfunction(L, regex_gc); lua_setfield(L, -2, "__gc");
+    lua_newtable(L);
+    lua_pushcfunction(L, regex_match); lua_setfield(L, -2, "match");
+    lua_setfield(L, -2, "__index");
+    lua_pop(L, 1);
 }
 
 void codua2a_install(lua_State *L) {
+    register_regex(L);
     lua_newtable(L);
     lua_pushcfunction(L, poll_command); lua_setfield(L, -2, "poll");
     lua_pushcfunction(L, emit_event); lua_setfield(L, -2, "emit");
     lua_pushcfunction(L, check_path); lua_setfield(L, -2, "check_path");
+    lua_pushcfunction(L, list_dir); lua_setfield(L, -2, "list_dir");
+    lua_pushcfunction(L, compile_regex); lua_setfield(L, -2, "regex");
+    lua_pushcfunction(L, now_ms); lua_setfield(L, -2, "now_ms");
     lua_pushstring(L, workspace); lua_setfield(L, -2, "workspace");
     lua_setglobal(L, "android_bridge");
 }
@@ -122,7 +201,9 @@ JNIEXPORT jint JNICALL Java_app_codua2a_AgentRuntime_nativeRun(JNIEnv *env, jobj
     (*env)->DeleteLocalRef(env, cls);
     if (!receiver || !on_event) return -5;
     pthread_mutex_lock(&lock); active = 1; pthread_mutex_unlock(&lock);
-    char *argv[] = { "codua2a", "android/bootstrap.lua", "SERVER_NAME=codua2a", NULL };
+    /* xargs splits KEY=VALUE arguments in place; literals are read-only on Android. */
+    char program[] = "codua2a", script[] = "android/bootstrap.lua", server[] = "SERVER_NAME=codua2a";
+    char *argv[] = { program, script, server, NULL };
     rc = codua2a_run(3, argv);
     pthread_mutex_lock(&lock);
     active = 0;
@@ -137,7 +218,7 @@ JNIEXPORT jint JNICALL Java_app_codua2a_AgentRuntime_nativeRun(JNIEnv *env, jobj
 JNIEXPORT jboolean JNICALL Java_app_codua2a_AgentRuntime_nativeSend(JNIEnv *env, jobject self, jbyteArray bytes) {
     (void)self;
     jsize len = (*env)->GetArrayLength(env, bytes);
-    if (len <= 0 || len > 1024 * 1024) return JNI_FALSE;
+    if (len <= 0 || len > 8 * 1024 * 1024) return JNI_FALSE;
     Command *cmd = calloc(1, sizeof(*cmd));
     if (!cmd) return JNI_FALSE;
     cmd->data = malloc((size_t)len + 1); cmd->len = (size_t)len;

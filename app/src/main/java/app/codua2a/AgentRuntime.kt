@@ -26,6 +26,9 @@ object AgentRuntime {
     var pendingApproval: JSONObject? = null; private set
     var sessions: org.json.JSONArray? = null
     var draft = ""
+    var mcpStatus = "尚未连接 MCP"; private set
+    var serviceListener: (() -> Unit)? = null
+    val attachments = mutableListOf<JSONObject>()
     private external fun nativeRun(root: String): Int
     private external fun nativeSend(command: ByteArray): Boolean
 
@@ -68,9 +71,22 @@ object AgentRuntime {
 
     fun submit(text: String): Boolean {
         if (busy || !configured || text.isBlank()) return false
-        val sent = send(JSONObject().put("action", "submit").put("text", text))
-        if (sent) { busy = true; status = "正在思考…"; notifyUi() }
+        AgentService.begin(context)
+        val sent = send(JSONObject().put("action", "submit").put("text", text).put("images", org.json.JSONArray(attachments)))
+        if (sent) { attachments.clear(); busy = true; status = "正在思考…"; notifyUi() }
         return sent
+    }
+
+    fun configureTools(config: JSONObject, connect: Boolean): Boolean {
+        if (!send(JSONObject().put("action", "configure_tools").put("shell", config.optBoolean("shell"))
+                .put("mcp", config.optJSONObject("mcp") ?: JSONObject()))) return false
+        if (connect) {
+            AgentService.begin(context)
+            val sent = send(JSONObject().put("action", "connect_mcp"))
+            if (sent) { busy = true; status = "正在连接 MCP…"; notifyUi() }
+            return sent
+        }
+        return true
     }
 
     fun approve(allow: Boolean) {
@@ -97,10 +113,20 @@ object AgentRuntime {
         when (e.optString("type")) {
             "ready" -> {
                 ready = true; status = "就绪 · 请配置模型"
-                try { SecureSettings(context).load()?.let { send(JSONObject().put("action", "configure").put("config", it)) } }
+                try { SecureSettings(context).load()?.let {
+                    configureTools(it, false)
+                    if (it.has("model")) send(JSONObject().put("action", "configure").put("config", it))
+                } }
                 catch (_: Exception) { status = "无法解密原配置，请在设置中重新保存" }
             }
             "configured" -> { configured = true; status = "就绪 · ${e.optString("model")}" }
+            "mcp_status" -> {
+                val servers = e.optJSONArray("servers")
+                mcpStatus = if (servers == null || servers.length() == 0) "未配置 MCP 服务器" else
+                    (0 until servers.length()).joinToString("\n") { n -> servers.getJSONObject(n).let {
+                        "${it.optString("name")}: ${it.optString("status")} · ${it.optInt("tools")} tools ${it.optString("error", "")}" } }
+                status = mcpStatus
+            }
             "user" -> { streaming = null; add("你", e.optString("text")) }
             "text" -> {
                 if (streaming == null) { add("Codua2a", ""); streaming = messages.last() }
@@ -146,6 +172,6 @@ object AgentRuntime {
     private fun notifyUi() {
         if (renderQueued) return
         renderQueued = true
-        main.postDelayed({ renderQueued = false; listener?.invoke() }, 40)
+        main.postDelayed({ renderQueued = false; listener?.invoke(); serviceListener?.invoke() }, 40)
     }
 }

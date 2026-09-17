@@ -159,8 +159,17 @@ function Session:save(dir)
     dir = dir or M.dir()
     fs.mkdirp(dir)
     local path = dir .. '/' .. self.id .. '.json'
-    local ok, err = fs.write_file(path, xutils.json_pack(self:to_table()))
+    local encoded, encode_err = xutils.json_pack(self:to_table())
+    if not encoded then return nil, encode_err or 'session encoding failed' end
+    -- Android rename replaces atomically on the same filesystem; interrupted writes
+    -- leave the last completed session intact. Keep desktop snapshot behavior.
+    local temporary = android_bridge and android_bridge.now_ms and (path .. '.tmp') or path
+    local ok, err = fs.write_file(temporary, encoded)
     if not ok then return nil, err end
+    if temporary ~= path then
+        ok, err = os.rename(temporary, path)
+        if not ok then os.remove(temporary); return nil, err end
+    end
     return path
 end
 

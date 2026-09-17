@@ -17,10 +17,10 @@ string(REPLACE "${HOOK}" "${HOOK}\n    extern void codua2a_install(lua_State*);\
 string(REPLACE "int main(int argc, char** argv)" "int codua2a_run(int argc, char** argv)" RUNNER "${RUNNER}")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/codua2a_runner.c" "${RUNNER}")
 set(SOURCES)
-foreach(SRC xargs xpoll xsock xchannel xthread xtimer xlog xshared xrecord xframe_aead)
+foreach(SRC xargs xpoll xsock xchannel xthread xtimer xlog xshared xrecord xframe_aead xproc)
     list(APPEND SOURCES "${CORE}/${SRC}.c")
 endforeach()
-foreach(MOD xthread xnet xnet_tls cmsgpack xtimer xcompress xshared xrecord xutils)
+foreach(MOD xthread xnet xnet_tls cmsgpack xtimer xcompress xshared xrecord xutils xproc)
     list(APPEND SOURCES "${CORE}/xlua/lua_${MOD}.c")
 endforeach()
 file(GLOB TLS_SOURCES CONFIGURE_DEPENDS "${CORE}/3rd/mbedtls3/library/*.c")
@@ -35,7 +35,7 @@ add_library(codua2a SHARED bridge.c android_daemon.c
     "${CORE}/3rd/yyjson.c" ${TLS_SOURCES} ${DEFLATE_SOURCES})
 target_include_directories(codua2a PRIVATE "${CORE}" "${CORE}/3rd/libdeflate" "${CORE}/3rd/mbedtls3/include")
 target_compile_definitions(codua2a PRIVATE LUA_EMBEDDED XNET_WITH_HTTP=1 XNET_WITH_HTTPS=1
-    XNET_WITH_XDEBUG=0 XNET_WITH_XPROC=0 XMACRO_USE_RPMALLOC=0)
+    XNET_WITH_XDEBUG=0 XNET_WITH_XPROC=1 XMACRO_USE_RPMALLOC=0)
 # Also supports 16 KiB page-size devices with this pinned NDK.
 target_link_options(codua2a PRIVATE "-Wl,-z,max-page-size=16384")
 target_link_libraries(codua2a log android m dl)

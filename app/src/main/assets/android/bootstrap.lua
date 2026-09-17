@@ -11,6 +11,8 @@ function dofile(path)
         result.mkdirp = function(dir) return json.mkdir_p(dir) end
     elseif path == 'scripts/core/share/xhttp_stream.lua' then
         result = network.wrap(result)
+    elseif path == 'scripts/core/share/xhttp_client.lua' then
+        result = network.wrap_http(result)
     end
     return result
 end
@@ -20,7 +22,12 @@ local session = require('xagent.session.session')
 local async = dofile('scripts/core/share/xasync.lua')
 local skills = require('xagent.skills')
 local router = dofile('scripts/core/share/xrouter.lua')
+package.loaded['xagent.mcp.transport_http'] = require('mcp_transport')
+local mcp = require('mcp_manager')
+local process = require('process')
+local files = require('files')
 local current, busy, pending, config
+local cancelled = false
 local approval_id = 0
 local workspace = host.workspace
 
@@ -55,13 +62,17 @@ for _, name in ipairs({ 'read', 'write', 'edit', 'multi_edit', 'ls', 'glob',
     register(name)
 end
 
+if host.list_dir then
+    for _, tool in ipairs(files.tools(function() return cancelled end)) do registry.register(tool) end
+end
+
 local function system_prompt()
     return 'You are Codua2a, a coding assistant running on Android. Reply in the user\'s language.\n'
         .. 'Workspace: ' .. workspace .. '\n'
         .. 'Only access this workspace. Files are imported by the user. '
-        .. 'Shell, Bash, external rg, package installation and build execution are unavailable. '
+        .. 'Shell is available only when the Bash tool is advertised; it uses Android sh. External development runtimes may be unavailable. '
         .. 'Use only advertised tools. Request approval for changes through the provided tools. '
-        .. 'Do not claim to have run commands.\nDate: ' .. os.date('%Y-%m-%d')
+        .. 'Report only operations actually performed.\nDate: ' .. os.date('%Y-%m-%d')
 end
 
 local function options()
@@ -103,16 +114,36 @@ local function configure(value)
 end
 
 local function save()
+    if not current then return end
     local path, err = current:save()
     if not path then fail('Cannot save session: ' .. tostring(err)) end
+end
+
+local function run_task(fn)
+    cancelled = false; network.cancelled = false
+    if current then current.cancelled = false end
+    busy = true; emit({ type = 'busy', value = true })
+    local co = coroutine.create(function()
+        local ok, err = xpcall(fn, debug.traceback)
+        if not ok then fail(err) end
+        network.complete()
+        local saved, save_err = pcall(save)
+        if not saved then fail(save_err) end
+        busy = false; pending = nil
+        emit({ type = 'busy', value = false })
+    end)
+    local ok, err = coroutine.resume(co)
+    if not ok then busy = false; fail(err); emit({ type = 'busy', value = false }) end
 end
 
 local function dispatch(command)
     local action = command.action
     if action == 'cancel' then
+        cancelled = true
         if current then current.cancelled = true end
         if pending then local p = pending; pending = nil; p.resolve(false) end
         network.cancel()
+        process.cancel()
         emit({ type = 'status', text = busy and '停止中…' or '已停止' })
         return
     elseif action == 'confirm' then
@@ -124,6 +155,18 @@ local function dispatch(command)
     assert(not busy, 'Wait for the current task to finish')
     if action == 'configure' then
         configure(command.config)
+    elseif action == 'configure_tools' then
+        mcp.configure(command.mcp or {})
+        registry.unregister('Bash')
+        if command.shell == true then
+            assert(process.supported(), 'Shell is unavailable in this runtime')
+            registry.register(process.tool)
+        end
+        if current then current.tools = registry.to_api_params(); current.system = system_prompt() end
+        emit({ type = 'tools_configured' })
+    elseif action == 'connect_mcp' then
+        mcp.dirty = true
+        run_task(function() mcp.connect(emit, function() return cancelled end) end)
     elseif action == 'new' then
         new_session()
     elseif action == 'sessions' then
@@ -140,27 +183,27 @@ local function dispatch(command)
         assert(config, '请先在设置中配置模型')
         assert(type(command.text) == 'string' and command.text:match('%S'), 'Message cannot be empty')
         if not current then new_session() end
-        current.cancelled = false
-        network.cancelled = false
-        current:add_user(command.text)
+        local content = command.text
+        local images = command.images or {}
+        assert(type(images) == 'table' and #images <= 4, 'Maximum four images')
+        if #images > 0 then
+            content = { { type = 'text', text = command.text } }
+            for _, image in ipairs(images) do
+                assert(type(image) == 'table' and image.media_type == 'image/jpeg'
+                    and type(image.data) == 'string' and #image.data <= 1500000
+                    and not image.data:find('[^A-Za-z0-9+/=]'), 'Invalid or oversized image')
+                content[#content + 1] = { type = 'image', source = { type = 'base64', media_type = image.media_type, data = image.data } }
+            end
+        end
+        current:add_user(content)
         save()
-        emit({ type = 'user', text = command.text })
-        busy = true
-        emit({ type = 'busy', value = true })
-        local co = coroutine.create(function()
-            local ok, err = xpcall(function()
-                skills.bootstrap(workspace)
-                current:run(emit)
-            end, debug.traceback)
-            if not ok then fail(err) end
-            network.complete()
-            save()
-            busy = false
-            pending = nil
-            emit({ type = 'busy', value = false })
+        emit({ type = 'user', text = command.text .. (#images > 0 and ('\n[图片 × ' .. #images .. ']') or '') })
+        run_task(function()
+            mcp.connect(emit, function() return cancelled end)
+            current.tools = registry.to_api_params()
+            skills.bootstrap(workspace)
+            current:run(emit)
         end)
-        local ok, err = coroutine.resume(co)
-        if not ok then busy = false; fail(err); emit({ type = 'busy', value = false }) end
     else
         error('Unknown action: ' .. tostring(action))
     end
@@ -177,6 +220,8 @@ return {
     end,
     __update = function()
         network.tick()
+        process.tick()
+        files.tick()
         for _ = 1, 8 do
             local raw = host.poll()
             if not raw then break end
@@ -188,5 +233,5 @@ return {
             if not ok then fail(err) end
         end
     end,
-    __uninit = function() network.cancel(); xnet.uninit() end,
+    __uninit = function() network.cancel(); process.cancel(); xnet.uninit() end,
 }

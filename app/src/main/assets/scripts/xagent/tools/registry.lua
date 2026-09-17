@@ -23,6 +23,11 @@ function M.find(name)
     return tools[name]
 end
 
+function M.unregister(name)
+    tools[name] = nil
+    for i = #order, 1, -1 do if order[i] == name then table.remove(order, i) end end
+end
+
 function M.all()
     local list = {}
     for _, name in ipairs(order) do list[#list + 1] = tools[name] end

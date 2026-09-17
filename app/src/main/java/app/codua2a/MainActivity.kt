@@ -25,6 +25,7 @@ class MainActivity : Activity() {
     private lateinit var stop: Button
     private lateinit var scroll: ScrollView
     private lateinit var transcript: LinearLayout
+    private lateinit var attachmentButton: Button
     private val actions = mutableListOf<Button>()
     private val rendered = mutableListOf<Pair<AgentRuntime.Message, TextView>>()
     private var approvalDialog: AlertDialog? = null
@@ -56,7 +57,11 @@ class MainActivity : Activity() {
         action("新会话") { AgentRuntime.send(JSONObject().put("action", "new")) }
         action("历史") { AgentRuntime.send(JSONObject().put("action", "sessions")) }
         action("文件") { files() }
-        action("设置") { settings() }
+        action("设置") {
+            AlertDialog.Builder(this).setTitle("设置").setItems(arrayOf("模型服务", "工具与 MCP")) { _, n ->
+                if (n == 0) settings() else toolSettings()
+            }.show()
+        }
         root.addView(toolbar)
         transcript = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(12), 0, dp(12)) }
         scroll = ScrollView(this).apply { isFillViewport = true; addView(transcript) }
@@ -71,7 +76,20 @@ class MainActivity : Activity() {
         }
         root.addView(input, LinearLayout.LayoutParams(-1, -2))
         val controls = LinearLayout(this).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
-        controls.addView(TextView(this).apply { text = "文件更改需确认"; textSize = 11f; setTextColor(Color.GRAY) }, LinearLayout.LayoutParams(0, -2, 1f))
+        attachmentButton = Button(this).apply {
+            textSize = 12f
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity).setTitle("图片附件（最多 4 张）")
+                    .setItems(arrayOf("添加图片", "清空附件")) { _, option ->
+                        if (option == 1) { AgentRuntime.attachments.clear(); render() }
+                        else if (AgentRuntime.attachments.size >= 4) toast("最多 4 张图片")
+                        else startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE); type = "image/*"
+                        }, 12)
+                    }.show()
+            }
+        }
+        controls.addView(attachmentButton, LinearLayout.LayoutParams(0, -2, 1f))
         stop = Button(this).apply { text = "停止"; setOnClickListener { AgentRuntime.send(JSONObject().put("action", "cancel")) } }
         send = Button(this).apply {
             text = "发送"; setTextColor(teal)
@@ -82,6 +100,11 @@ class MainActivity : Activity() {
         }
         controls.addView(stop); controls.addView(send); root.addView(controls)
         setContentView(root)
+        if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            && !getPreferences(MODE_PRIVATE).getBoolean("notificationRequested", false)) {
+            getPreferences(MODE_PRIVATE).edit().putBoolean("notificationRequested", true).apply()
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 20)
+        }
         AgentRuntime.start(applicationContext)
     }
 
@@ -105,6 +128,8 @@ class MainActivity : Activity() {
         status.text = AgentRuntime.status
         send.isEnabled = AgentRuntime.ready && !AgentRuntime.busy && !importing
         stop.isEnabled = AgentRuntime.busy
+        attachmentButton.text = if (AgentRuntime.attachments.isEmpty()) "＋ 图片" else "图片 × ${AgentRuntime.attachments.size}"
+        attachmentButton.isEnabled = AgentRuntime.ready && !AgentRuntime.busy && !importing
         actions.forEach { it.isEnabled = AgentRuntime.ready && !AgentRuntime.busy && !importing }
         val keepBottom = transcript.height - (scroll.scrollY + scroll.height) < dp(100)
         if (rendered.size > AgentRuntime.messages.size || rendered.indices.any { rendered[it].first !== AgentRuntime.messages[it] }) {
@@ -135,7 +160,12 @@ class MainActivity : Activity() {
                     transcript.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
                     rendered.add(message to body)
                 }
-                if (rendered[index].second.text.toString() != message.text) rendered[index].second.text = message.text
+                val body = rendered[index].second
+                if (body.tag != message.text) {
+                    body.tag = message.text
+                    body.text = if (message.role == "Codua2a") NativeMarkdown.render(message.text) else message.text
+                    body.movementMethod = android.text.method.LinkMovementMethod.getInstance()
+                }
             }
         }
         if (keepBottom) scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
@@ -193,7 +223,7 @@ class MainActivity : Activity() {
                     model.text.isBlank() -> model.error = "填写模型 ID"
                     token.text.isBlank() -> token.error = "填写 API 密钥"
                     else -> try {
-                        val config = JSONObject().put("base_url", base).put("model", model.text.toString().trim())
+                        val config = (old ?: JSONObject()).put("base_url", base).put("model", model.text.toString().trim())
                             .put("api_key", token.text.toString().trim()).put("auth_style", if (bearer.isChecked) "bearer" else "x-api-key")
                         store.save(config)
                         if (AgentRuntime.send(JSONObject().put("action", "configure").put("config", config))) dialog.dismiss()
@@ -205,6 +235,48 @@ class MainActivity : Activity() {
     }
 
     private fun workspace() = File(filesDir, "runtime/workspace").apply { mkdirs() }
+
+    private fun toolSettings() {
+        val store = SecureSettings(this)
+        val config = try { store.load() ?: JSONObject() } catch (_: Exception) { JSONObject() }
+        val fields = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(10), dp(20), 0) }
+        val shell = CheckBox(this).apply { text = "启用 Android Shell（每次执行需确认）"; isChecked = config.optBoolean("shell") }
+        fields.addView(shell)
+        fields.addView(TextView(this).apply { text = "Shell 使用系统 sh，可访问本应用的数据；设备未安装的 git、Python 等命令不可用。\n\nMCP 支持 Streamable HTTP，调用远程工具需确认。填写标准 mcpServers JSON，可带 headers。" })
+        val servers = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            minLines = 5; maxLines = 12; textSize = 13f
+            setText((config.optJSONObject("mcp") ?: JSONObject().put("mcpServers", JSONObject())).toString(2))
+        }
+        fields.addView(servers)
+        fields.addView(TextView(this).apply { text = AgentRuntime.mcpStatus; setTextIsSelectable(true) })
+        val dialog = AlertDialog.Builder(this).setTitle("工具与 MCP")
+            .setView(ScrollView(this).apply { addView(fields) }).setPositiveButton("保存并连接", null).setNegativeButton("取消", null).create()
+        dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    val mcp = JSONObject(servers.text.toString())
+                    val entries = mcp.optJSONObject("mcpServers") ?: error("需要 mcpServers 对象")
+                    check(entries.length() <= 16) { "最多 16 个服务器" }
+                    entries.keys().forEach { name ->
+                        check(name.matches(Regex("[A-Za-z0-9_-]+")) && !name.contains("__")) { "服务器名称格式不正确" }
+                        val value = entries.getJSONObject(name)
+                        check(value.optString("type", "http") == "http") { "目前支持 type=http" }
+                        val uri = android.net.Uri.parse(value.getString("url"))
+                        check(uri.scheme in listOf("http", "https") && !uri.host.isNullOrBlank()) { "需要 HTTP(S) 地址" }
+                        (if (value.has("headers")) value.getJSONObject("headers") else null)?.let { headers -> headers.keys().forEach { key ->
+                            check(headers.get(key) is String && !key.contains('\n') && !key.contains('\r') && !headers.getString(key).contains(Regex("[\r\n]"))) { "无效请求头" }
+                        } }
+                    }
+                    config.put("mcp", mcp).put("shell", shell.isChecked)
+                    store.save(config)
+                    if (AgentRuntime.configureTools(config, true)) dialog.dismiss()
+                } catch (error: Exception) { servers.error = error.message ?: "配置无效" }
+            }
+        }
+        dialog.show()
+    }
     private fun files() {
         val root = workspace().canonicalFile
         val entries = root.walkTopDown().onEnter { it.canonicalPath.startsWith(root.path + File.separator) || it.canonicalFile == root }
@@ -232,13 +304,17 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         val uri = data?.data ?: return
-        if (resultCode != RESULT_OK || requestCode !in listOf(10, 11)) return
+        if (resultCode != RESULT_OK || requestCode !in listOf(10, 11, 12)) return
         importing = true; render()
         val export = exportFile
         Thread {
             var temporary: File? = null
             val message = try {
-                if (requestCode == 10) {
+                if (requestCode == 12) {
+                    val attachment = ImageAttachment.read(contentResolver, uri)
+                    runOnUiThread { if (AgentRuntime.attachments.size < 4) AgentRuntime.attachments.add(attachment) }
+                    "已添加图片，请填写问题后发送"
+                } else if (requestCode == 10) {
                     var name = "imported.txt"
                     contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
                         if (cursor.moveToFirst()) name = cursor.getString(0) ?: name
