@@ -120,5 +120,6 @@ adb shell am instrument -w -e mode ui app.codua2a.test/app.codua2a.NativeRuntime
 MCP JSON / 持续 SSE 连接、证书拒绝、图片压缩、Keystore 加密、Activity 重建、
 后台任务与服务停止、会话落盘。测试 HTTPS 密钥只打包在测试 APK，生产 APK 不含测试服务。
 
-ARM64 已编译，尚无 ARM 真机验证，也未使用真实模型账户进行计费请求。
+ARM64 已编译。用户已在华为 HarmonyOS 4.2 手机手动安装 APK，并确认应用可以运行。
+这项真机反馈仅确认安装与启动；尚未完成真机完整功能测试，也未验证真实模型账户的计费请求。
 不同厂商的后台策略、系统文件选择器导入导出及真实服务兼容性仍需对应设备验收。
