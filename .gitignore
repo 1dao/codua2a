@@ -1,0 +1,9 @@
+.gradle/
+.cxx/
+**/build/
+local.properties
+*.iml
+.idea/
+*.jks
+*.keystore
+app/src/main/assets/logs/

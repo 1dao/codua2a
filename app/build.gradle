@@ -1,0 +1,35 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+def runtimeAssets = layout.buildDirectory.dir('generated/agentAssets')
+tasks.register('prepareAgentAssets', Sync) {
+    from 'src/main/assets'
+    into runtimeAssets
+    exclude 'logs/**', '**/test_*.lua', 'scripts/xagent/gui.lua', 'scripts/xagent/ui/**'
+}
+android {
+    namespace 'app.codua2a'
+    compileSdk 34
+    ndkVersion '25.1.8937393'
+    defaultConfig {
+        applicationId 'app.codua2a'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0'
+        ndk { abiFilters 'arm64-v8a', 'x86_64' }
+        externalNativeBuild { cmake { arguments '-DANDROID_STL=none' } }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+    sourceSets {
+        main.assets.setSrcDirs([runtimeAssets])
+    }
+    externalNativeBuild { cmake { path 'src/main/cpp/CMakeLists.txt'; version '3.22.1' } }
+    buildTypes { release { minifyEnabled false } }
+}
+tasks.named('preBuild').configure { dependsOn 'prepareAgentAssets' }
