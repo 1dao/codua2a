@@ -139,7 +139,7 @@ object AgentRuntime {
             }
             "user" -> { streaming = null; add("你", e.optString("text")) }
             "text" -> {
-                if (streaming == null) { add("Codua2a", ""); streaming = messages.last() }
+                if (streaming == null) { add("codua", ""); streaming = messages.last() }
                 streaming!!.text += e.optString("text")
             }
             "assistant" -> { streaming = null }
@@ -171,7 +171,7 @@ object AgentRuntime {
                             }
                         } }.joinToString("\n")
                     } else ""
-                    if (text.isNotEmpty()) add(if (msg.optString("role") == "assistant") "Codua2a" else "你 / 工具", text)
+                    if (text.isNotEmpty()) add(if (msg.optString("role") == "assistant") "codua" else "你 / 工具", text)
                 }
                 status = "就绪"
             }

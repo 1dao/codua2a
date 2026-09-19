@@ -233,7 +233,7 @@ class MainActivity : Activity() {
                 val body = rendered[index].second
                 if (body.tag != message.text) {
                     body.tag = message.text
-                    body.text = if (message.role == "Codua2a") NativeMarkdown.render(message.text) else message.text
+                    body.text = if (message.role == "codua") NativeMarkdown.render(message.text) else message.text
                     body.movementMethod = android.text.method.LinkMovementMethod.getInstance()
                 }
             }

@@ -26,7 +26,7 @@ class AgentService : Service() {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val stop = PendingIntent.getService(this, 1, Intent(this, AgentService::class.java).setAction("stop"), PendingIntent.FLAG_IMMUTABLE)
         return Notification.Builder(this, "agent-tasks").setSmallIcon(R.drawable.ic_launcher)
-            .setContentTitle("Codua2a 正在处理任务").setContentText(AgentRuntime.status.take(120))
+            .setContentTitle("codua 正在处理任务").setContentText(AgentRuntime.status.take(120))
             .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
             .addAction(Notification.Action.Builder(null, "停止", stop).build()).build()
     }

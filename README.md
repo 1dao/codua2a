@@ -2,6 +2,7 @@
 
 Android 原生界面 + Lua Agent。Android 工程参考 `xproxy-android`，
 `core/` 是 `xnet2lua` Git submodule；应用层脚本来自 `codua`。
+Android 项目名为 `codua2a`；助手的自称、对话署名和任务通知统一使用 `codua`。
 
 ## 构建
 
