@@ -7,9 +7,7 @@ local original_dofile = dofile
 -- Keep the shared scripts unchanged; adapt their two platform entry points.
 function dofile(path)
     local result = original_dofile(path)
-    if path == 'scripts/core/share/xfs.lua' then
-        result.mkdirp = function(dir) return json.mkdir_p(dir) end
-    elseif path == 'scripts/core/share/xhttp_stream.lua' then
+    if path == 'scripts/core/share/xhttp_stream.lua' then
         result = network.wrap(result)
     elseif path == 'scripts/core/share/xhttp_client.lua' then
         result = network.wrap_http(result)
@@ -62,14 +60,16 @@ for _, name in ipairs({ 'read', 'write', 'edit', 'multi_edit', 'ls', 'glob',
     register(name)
 end
 
-if host.list_dir then
+if json.stat then
     for _, tool in ipairs(files.tools(function() return cancelled end)) do registry.register(tool) end
+    for _, tool in ipairs(require('xagent.tools.file_ops').tools()) do registry.register(tool) end
 end
 
 local function system_prompt()
     return 'You are Codua2a, a coding assistant running on Android. Reply in the user\'s language.\n'
         .. 'Workspace: ' .. workspace .. '\n'
         .. 'Only access this workspace. Files are imported by the user. '
+        .. 'Use native file tools for listing, searching, creating directories, copying, moving and deleting; these work without Shell or external commands. Write creates missing parent directories. '
         .. 'Shell is available only when the Bash tool is advertised; it uses Android sh. External development runtimes may be unavailable. '
         .. 'Use only advertised tools. Request approval for changes through the provided tools. '
         .. 'Report only operations actually performed.\nDate: ' .. os.date('%Y-%m-%d')

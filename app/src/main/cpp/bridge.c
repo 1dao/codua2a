@@ -6,7 +6,6 @@
 #include <unistd.h>
 #include <limits.h>
 #include <sys/stat.h>
-#include <dirent.h>
 #include <regex.h>
 #include "xtimer.h"
 #include "3rd/minilua.h"
@@ -95,37 +94,6 @@ static int check_path(lua_State *L) {
     return 1;
 }
 
-/* Directory traversal never follows symlinks, including after an approved shell
- * command creates one. Recursion and cancellation are handled by Lua. */
-static int list_dir(lua_State *L) {
-    size_t len;
-    const char *input = luaL_checklstring(L, 1, &len);
-    if (!path_allowed(input, len)) return luaL_error(L, "outside workspace");
-    char path[PATH_MAX];
-    if (input[0] == '/') snprintf(path, sizeof(path), "%s", input);
-    else snprintf(path, sizeof(path), "%s/%s", workspace, input);
-    DIR *dir = opendir(path);
-    if (!dir) { lua_pushnil(L); lua_pushliteral(L, "cannot open directory"); return 2; }
-    lua_newtable(L);
-    struct dirent *entry;
-    int index = 1;
-    while ((entry = readdir(dir)) != NULL && index <= 10000) {
-        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
-        char full[PATH_MAX];
-        if (snprintf(full, sizeof(full), "%s/%s", path, entry->d_name) >= PATH_MAX) continue;
-        struct stat st;
-        if (lstat(full, &st) || S_ISLNK(st.st_mode) || (!S_ISREG(st.st_mode) && !S_ISDIR(st.st_mode))) continue;
-        lua_newtable(L);
-        lua_pushstring(L, full); lua_setfield(L, -2, "path");
-        lua_pushstring(L, entry->d_name); lua_setfield(L, -2, "name");
-        lua_pushboolean(L, S_ISDIR(st.st_mode)); lua_setfield(L, -2, "is_dir");
-        lua_pushinteger(L, st.st_size); lua_setfield(L, -2, "size");
-        lua_rawseti(L, -2, index++);
-    }
-    closedir(dir);
-    return 1;
-}
-
 typedef struct { regex_t regex; int valid; } Regex;
 static int regex_gc(lua_State *L) {
     Regex *r = luaL_checkudata(L, 1, "codua2a.regex");
@@ -168,7 +136,6 @@ void codua2a_install(lua_State *L) {
     lua_pushcfunction(L, poll_command); lua_setfield(L, -2, "poll");
     lua_pushcfunction(L, emit_event); lua_setfield(L, -2, "emit");
     lua_pushcfunction(L, check_path); lua_setfield(L, -2, "check_path");
-    lua_pushcfunction(L, list_dir); lua_setfield(L, -2, "list_dir");
     lua_pushcfunction(L, compile_regex); lua_setfield(L, -2, "regex");
     lua_pushcfunction(L, now_ms); lua_setfield(L, -2, "now_ms");
     lua_pushstring(L, workspace); lua_setfield(L, -2, "workspace");

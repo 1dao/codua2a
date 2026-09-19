@@ -27,6 +27,36 @@ local function run()
     assert(tools.LS.call({}, { cwd = host.workspace }).content:find('empty/', 1, true))
     assert(tools.Glob.call({ pattern = '**/*.txt' }, { cwd = host.workspace }).content:find('note.txt', 1, true))
     assert(tools.Grep.call({ pattern = 'HELLO|世界', ignore_case = true }, { cwd = host.workspace }).content:find(':1:hello 世界', 1, true))
+    -- Native file tools must work even when shell entry points are unavailable.
+    local old_execute, old_popen = os.execute, io.popen
+    os.execute = function() error('File tool attempted a shell command') end
+    io.popen = os.execute
+    local ctx = { cwd = host.workspace }
+    for _, tool in ipairs(require('xagent.tools.file_ops').tools()) do tools[tool.name] = tool end
+    local function call(name, input)
+        local result = tools[name].call(input, ctx); assert(not result.is_error, result.content); return result.content
+    end
+    call('DeletePath', { path = 'native-文件', recursive = true })
+    call('MakeDirectory', { path = 'native-文件/空目录' })
+    assert(json.stat(host.workspace .. '/native-文件/空目录').type == 'directory')
+    local wrote = require('xagent.tools.write').call({ file_path = 'native-文件/自动/hello.txt', content = '原生文件 😀' }, ctx)
+    assert(not wrote.is_error, wrote.content)
+    assert(not json.mkdir_p(host.workspace .. '/native-文件/自动/hello.txt'))
+    call('CopyFile', { source = 'native-文件/自动/hello.txt', destination = 'native-文件/copy.txt' })
+    assert(tools.CopyFile.call({ source = 'native-文件/copy.txt', destination = 'native-文件/copy.txt' }, ctx).is_error)
+    call('MovePath', { source = 'native-文件/copy.txt', destination = 'native-文件/moved.txt' })
+    local info = assert(json.json_unpack(call('FileInfo', { path = 'native-文件/moved.txt' })))
+    assert(info.type == 'file' and info.size == #'原生文件 😀')
+    assert(tools.DeletePath.call({ path = './', recursive = true }, ctx).is_error)
+    assert(tools.MovePath.call({ source = 'native-文件', destination = 'native-文件/child' }, ctx).is_error)
+    assert(tools.CopyFile.call({ source = 'native-文件/moved.txt', destination = '../outside' }, ctx).is_error)
+    assert(tools.DeletePath.call({ path = 'native-文件' }, ctx).is_error)
+    assert(json.stat(host.workspace .. '/outside').type == 'link')
+    assert(not tools.LS.call({}, ctx).content:find('outside', 1, true))
+    local bounded, truncated = json.list_dir(host.workspace, 1); assert(#bounded == 1 and truncated)
+    call('DeletePath', { path = 'native-文件', recursive = true })
+    assert(not json.stat(host.workspace .. '/native-文件').exists)
+    os.execute, io.popen = old_execute, old_popen
     local timed = process.run({ '/system/bin/sh', '-c', 'sleep 10' }, host.workspace, 100)
     assert(timed.is_error and timed.content:find('timed out', 1, true), timed.content)
     local result2

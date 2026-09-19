@@ -26,15 +26,15 @@ adb shell am start -n app.codua2a/.MainActivity
 
 ## 使用
 
-1. 在设置中填写 HTTPS 服务根地址、模型 ID 和 API 密钥。接口必须兼容
+1. 在右上角 `⋮ → 模型设置` 中填写 HTTPS 服务根地址、模型 ID 和 API 密钥。接口必须兼容
    Anthropic Messages；程序追加 `/v1/messages`。支持 x-api-key 或 Bearer。
 2. 开始对话，文本以流式更新。文件变更会弹出允许 / 拒绝确认。
-3. 在“文件”中导入设备文档（单文件最多 16 MiB）。同名文件另存，不覆盖原文档。
+3. 点输入区 `＋ → 导入文件` 导入设备文档（单文件最多 16 MiB）。同名文件另存，不覆盖原文档。
 4. 文件更改保存在应用内部工作区，选择文件可导出回设备。
-5. “历史”可恢复已保存会话；“新会话”保留旧会话和工作区。
-6. “＋ 图片”从设备选择最多 4 张图片，每张最多 16 MiB；发送前缩小并转换成
+5. 左上角历史图标可恢复已保存会话；顶部新会话图标保留旧会话和工作区。
+6. `＋ → 添加图片` 从设备选择最多 4 张图片，每张最多 16 MiB；发送前缩小并转换成
    不超过 1 MiB 的 JPEG。模型须支持视觉输入。恢复历史时用文字提示代替旧图片。
-7. “设置 → 工具与 MCP”可启用系统 Shell 或配置远程 MCP。Shell 默认关闭，
+7. `⋮ → 工具与 MCP` 可启用系统 Shell 或配置远程 MCP。Shell 默认关闭，
    开启后每次命令仍需确认；使用 Android `/system/bin/sh`，不是桌面 GNU Bash。
 8. 任务执行期间使用前台服务，通知可停止任务；完成后自动退出服务。
    通知权限被拒绝时仍可在应用中停止。单次服务最长运行 30 分钟。
@@ -63,7 +63,10 @@ MCP 配置示例（密钥和请求头与模型配置一起加密保存）：
 - 单个专用线程执行 xnet 的 Lua / 网络事件循环。UI 通过有界命令队列发送操作。
 - Activity 重建共享同一个运行时；模型密钥由 Android Keystore AES-GCM 加密保存。
 - TLS 使用 core 的 mbedTLS 和内置 CA，开启证书验证。
-- Read、Write、Edit、MultiEdit、LS、Glob、Grep、WebFetch、MemoryWrite、TodoWrite、Skill，以及可选 Shell / MCP。
+- Read、Write、Edit、MultiEdit、LS、Glob、Grep、FileInfo、MakeDirectory、CopyFile、MovePath、DeletePath、WebFetch、MemoryWrite、TodoWrite、Skill，以及可选 Shell / MCP。
+- 基础文件操作不依赖 Shell：`xutils.list_dir/stat/mkdir_p/rmtree` 与 Lua `io/os`
+  提供列目录、元信息、创建、复制、移动、删除。Write 自动创建父目录。
+  CopyFile 限制 64 MiB；复制/移动拒绝覆盖，删除目录树须显式 `recursive=true`。
 - 文件工具限定内部 workspace，JNI 校验路径和现有符号链接。Shell 权限是整个
   Android 应用沙箱，能访问本应用其他数据，不能视为 workspace 隔离。
 - LS / Glob / Grep 不依赖外部 rg；Grep 使用 POSIX 扩展正则，支持字面量模式。
@@ -90,6 +93,7 @@ tests/                      离线 Android 桥接回归测试
 ```
 
 CMake 从 core 的 runner 生成 Android 入口并注入 bridge，避免修改 submodule。
+原生通用能力在 `xnet2lua` 上游实现后更新 submodule 指针；Android bridge 只保留宿主与路径策略等适配。
 Android daemon 适配不会覆盖 ART 的信号处理器。升级 core 后需重新验证入口注入及 ABI。
 第三方依赖与许可证见 `THIRD_PARTY_NOTICES.md`。
 
@@ -119,6 +123,8 @@ adb shell am instrument -w -e mode ui app.codua2a.test/app.codua2a.NativeRuntime
 原生正则 / 搜索、真实 Shell 输出 / 超时 / 取消、设备内 HTTPS 模型 SSE、
 MCP JSON / 持续 SSE 连接、证书拒绝、图片压缩、Keystore 加密、Activity 重建、
 后台任务与服务停止、会话落盘。测试 HTTPS 密钥只打包在测试 APK，生产 APK 不含测试服务。
+新增文件操作测试在禁止 `os.execute/io.popen` 的条件下运行，验证中文目录、自动建父目录、
+复制/移动/删除、覆盖拒绝、工作区根保护、符号链接过滤和有界列举。
 
 ARM64 已编译。用户已在华为 HarmonyOS 4.2 手机手动安装 APK，并确认应用可以运行。
 这项真机反馈仅确认安装与启动；尚未完成真机完整功能测试，也未验证真实模型账户的计费请求。

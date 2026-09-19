@@ -1,7 +1,24 @@
 local host = android_bridge
+local utils = require('xutils')
 local glob = dofile('scripts/core/share/xglob.lua')
 local text = dofile('scripts/core/share/xtext.lua')
 local M = {}
+-- Reuse core APIs; only workspace policy belongs to the Android host.
+local function list_dir(path)
+    assert(host.check_path(path), 'Path outside workspace')
+    local items, truncated = utils.list_dir(path, 10000)
+    if not items then return nil, truncated end
+    local entries = {}
+    for _, item in ipairs(items) do
+        local full = path .. '/' .. item.name
+        local info, err = utils.stat(full)
+        assert(info, err)
+        if info.exists and (info.type == 'directory' or info.type == 'file') and host.check_path(full) then
+            entries[#entries + 1] = { name = item.name, path = full, is_dir = info.type == 'directory', size = info.size }
+        end
+    end
+    return entries, truncated
+end
 local deferred = {}
 function M.tick()
     local waiting = deferred; deferred = {}
@@ -19,8 +36,8 @@ function M.walk(root, callback, stopped)
     local stack, count = { root }, 0
     while #stack > 0 and count < 10000 do
         local dir = table.remove(stack)
-        local entries, err = host.list_dir(dir)
-        assert(entries, err)
+        local entries, truncated = list_dir(dir)
+        assert(entries, truncated)
         for _, entry in ipairs(entries) do
             count = count + 1
             if count > 10000 then return false end
@@ -30,6 +47,7 @@ function M.walk(root, callback, stopped)
             if count % 32 == 0 then pause() end
             if stopped and stopped() then return false end
         end
+        if truncated then return false end
     end
     return #stack == 0
 end
@@ -41,11 +59,11 @@ function M.tools(stopped)
             input_schema = { type = 'object', properties = { path = { type = 'string' } } },
             is_read_only = function() return true end,
             call = function(input, ctx)
-                local entries, err = host.list_dir(base(input, ctx)); assert(entries, err)
+                local entries, truncated = list_dir(base(input, ctx)); assert(entries, truncated)
                 local out = {}
                 for i, entry in ipairs(entries) do if i > 500 then break end; out[#out + 1] = entry.name .. (entry.is_dir and '/' or '') end
                 table.sort(out)
-                return { content = #out > 0 and table.concat(out, '\n') or '(empty)' }
+                return { content = (#out > 0 and table.concat(out, '\n') or '(empty)') .. ((truncated or #entries > 500) and '\n[list truncated]' or '') }
             end,
         },
         {
@@ -93,9 +111,10 @@ function M.tools(stopped)
                     end
                     return true
                 end
-                local entries = host.list_dir(root)
+                local info, err = utils.stat(root); assert(info, err)
+                assert(info.exists and (info.type == 'file' or info.type == 'directory'), 'Path is not a regular file or directory')
                 local complete
-                if entries then complete = M.walk(root, scan, stopped)
+                if info.type == 'directory' then complete = M.walk(root, scan, stopped)
                 else complete = scan({ path = root, name = root:match('[^/]+$') }) end
                 return { content = text.valid_utf8((#out == 0 and 'No matches.' or table.concat(out, '\n')) .. (complete and '' or '\n[scan stopped or limit reached]')) }
             end,

@@ -11,15 +11,9 @@ function M.home()
     return os.getenv('USERPROFILE') or os.getenv('HOME') or '.'
 end
 
--- Create a directory and any missing parents. Uses a brief os.execute (the only
--- portable mkdir we have without a C binding); output is suppressed.
+-- The runtime provides directory creation on every supported platform.
 function M.mkdirp(path)
-    if M.is_windows then
-        local p = path:gsub('/', '\\')
-        os.execute('if not exist "' .. p .. '" mkdir "' .. p .. '" >nul 2>nul')
-    else
-        os.execute('mkdir -p "' .. path .. '" >/dev/null 2>&1')
-    end
+    return require('xutils').mkdir_p(path)
 end
 
 function M.read_file(path)
@@ -33,8 +27,9 @@ end
 function M.write_file(path, data)
     local f, err = io.open(path, 'wb')
     if not f then return nil, err end
-    f:write(data)
-    f:close()
+    local written, write_err = f:write(data)
+    local closed, close_err = f:close()
+    if not written or not closed then return nil, write_err or close_err end
     return true
 end
 

@@ -21,12 +21,13 @@ class MainActivity : Activity() {
     private val teal = Color.rgb(18, 111, 100)
     private lateinit var status: TextView
     private lateinit var input: EditText
-    private lateinit var send: Button
-    private lateinit var stop: Button
+    private lateinit var send: ImageButton
+    private lateinit var stop: ImageButton
     private lateinit var scroll: ScrollView
     private lateinit var transcript: LinearLayout
-    private lateinit var attachmentButton: Button
-    private val actions = mutableListOf<Button>()
+    private lateinit var attachmentButton: ImageButton
+    private lateinit var attachmentCount: TextView
+    private val actions = mutableListOf<ImageButton>()
     private val rendered = mutableListOf<Pair<AgentRuntime.Message, TextView>>()
     private var approvalDialog: AlertDialog? = null
     private var approvalId = -1
@@ -34,6 +35,16 @@ class MainActivity : Activity() {
     private var importing = false
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
     private fun shape(color: Int) = GradientDrawable().apply { setColor(color); cornerRadius = dp(14).toFloat() }
+    private fun iconButton(icon: String, label: String, filled: Boolean = false, block: () -> Unit) = ImageButton(this).apply {
+        setImageDrawable(ChatIcon(icon, if (filled) Color.WHITE else ink))
+        contentDescription = label; tooltipText = label
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        setPadding(dp(12), dp(12), dp(12), dp(12))
+        background = android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(Color.argb(35, 18, 111, 100)),
+            shape(if (filled) teal else Color.TRANSPARENT), shape(Color.WHITE))
+        setOnClickListener { block() }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,62 +54,60 @@ class MainActivity : Activity() {
         exportFile = savedInstanceState?.getString("exportFile")?.let { File(it) }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(8))
+            setPadding(dp(12), dp(6), dp(12), dp(8))
             setBackgroundColor(Color.rgb(243, 247, 246))
         }
-        root.addView(TextView(this).apply { text = "Codua2a"; textSize = 27f; setTextColor(ink); setTypeface(null, Typeface.BOLD) })
-        status = TextView(this).apply { textSize = 12f; setTextColor(teal); setPadding(0, dp(4), 0, dp(8)) }
-        root.addView(status)
-        val toolbar = LinearLayout(this)
-        fun action(label: String, block: () -> Unit) {
-            val button = Button(this).apply { text = label; textSize = 12f; isAllCaps = false; setPadding(0, 0, 0, 0); setOnClickListener { block() } }
-            toolbar.addView(button, LinearLayout.LayoutParams(0, dp(44), 1f)); actions.add(button)
+        val toolbar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        val history = iconButton("history", "历史会话") { AgentRuntime.send(JSONObject().put("action", "sessions")) }
+        toolbar.addView(history, LinearLayout.LayoutParams(dp(48), dp(48))); actions.add(history)
+        val heading = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(4), dp(4), dp(4)) }
+        heading.addView(TextView(this).apply { text = "Codua2a"; textSize = 20f; setTextColor(ink); setTypeface(null, Typeface.BOLD) })
+        status = TextView(this).apply {
+            textSize = 11f; setTextColor(teal); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
         }
-        action("新会话") { AgentRuntime.send(JSONObject().put("action", "new")) }
-        action("历史") { AgentRuntime.send(JSONObject().put("action", "sessions")) }
-        action("文件") { files() }
-        action("设置") {
-            AlertDialog.Builder(this).setTitle("设置").setItems(arrayOf("模型服务", "工具与 MCP")) { _, n ->
-                if (n == 0) settings() else toolSettings()
-            }.show()
+        heading.addView(status)
+        toolbar.addView(heading, LinearLayout.LayoutParams(0, -2, 1f))
+        val newChat = iconButton("new", "新会话") {
+            if (AgentRuntime.send(JSONObject().put("action", "new"))) { AgentRuntime.attachments.clear(); render() }
         }
+        toolbar.addView(newChat, LinearLayout.LayoutParams(dp(48), dp(48))); actions.add(newChat)
+        val more = iconButton("more", "更多选项") { }
+        more.setOnClickListener { showMore(more) }
+        toolbar.addView(more, LinearLayout.LayoutParams(dp(48), dp(48)))
         root.addView(toolbar)
         transcript = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(12), 0, dp(12)) }
         scroll = ScrollView(this).apply { isFillViewport = true; addView(transcript) }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        val composer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = shape(Color.WHITE).apply { setStroke(dp(1), Color.rgb(222, 231, 227)) }
+            setPadding(dp(6), dp(4), dp(6), dp(6))
+        }
         input = EditText(this).apply {
-            hint = "描述任务，或先导入要处理的文件…"
+            hint = "问点什么，或描述一个任务…"
             textSize = 16f; setTextColor(ink)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            minLines = 2; maxLines = 5; gravity = Gravity.TOP
-            background = shape(Color.WHITE); setPadding(dp(12), dp(10), dp(12), dp(10))
+            minLines = 1; maxLines = 5; gravity = Gravity.TOP
+            background = null; setPadding(dp(10), dp(10), dp(10), dp(8))
             setText(AgentRuntime.draft)
         }
-        root.addView(input, LinearLayout.LayoutParams(-1, -2))
+        composer.addView(input, LinearLayout.LayoutParams(-1, -2))
         val controls = LinearLayout(this).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
-        attachmentButton = Button(this).apply {
-            textSize = 12f
-            setOnClickListener {
-                AlertDialog.Builder(this@MainActivity).setTitle("图片附件（最多 4 张）")
-                    .setItems(arrayOf("添加图片", "清空附件")) { _, option ->
-                        if (option == 1) { AgentRuntime.attachments.clear(); render() }
-                        else if (AgentRuntime.attachments.size >= 4) toast("最多 4 张图片")
-                        else startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                            addCategory(Intent.CATEGORY_OPENABLE); type = "image/*"
-                        }, 12)
-                    }.show()
-            }
+        attachmentButton = iconButton("plus", "添加图片或文件") { showAttachments() }
+        controls.addView(attachmentButton, LinearLayout.LayoutParams(dp(48), dp(48)))
+        attachmentCount = TextView(this).apply {
+            textSize = 12f; setTextColor(teal); gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), 0, dp(8), 0)
         }
-        controls.addView(attachmentButton, LinearLayout.LayoutParams(0, -2, 1f))
-        stop = Button(this).apply { text = "停止"; setOnClickListener { AgentRuntime.send(JSONObject().put("action", "cancel")) } }
-        send = Button(this).apply {
-            text = "发送"; setTextColor(teal)
-            setOnClickListener {
-                if (!AgentRuntime.configured) settings()
-                else if (AgentRuntime.submit(input.text.toString().trim())) { input.text.clear(); AgentRuntime.draft = "" }
-            }
+        controls.addView(attachmentCount, LinearLayout.LayoutParams(0, -2, 1f))
+        stop = iconButton("stop", "停止任务", true) { AgentRuntime.send(JSONObject().put("action", "cancel")) }
+        send = iconButton("send", "发送消息", true) {
+            if (!AgentRuntime.configured) settings()
+            else if (AgentRuntime.submit(input.text.toString().trim())) { input.text.clear(); AgentRuntime.draft = "" }
         }
-        controls.addView(stop); controls.addView(send); root.addView(controls)
+        controls.addView(stop, LinearLayout.LayoutParams(dp(48), dp(48)))
+        controls.addView(send, LinearLayout.LayoutParams(dp(48), dp(48)))
+        composer.addView(controls); root.addView(composer)
         setContentView(root)
         if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
             && !getPreferences(MODE_PRIVATE).getBoolean("notificationRequested", false)) {
@@ -127,18 +136,22 @@ class MainActivity : Activity() {
     private fun render() {
         status.text = AgentRuntime.status
         send.isEnabled = AgentRuntime.ready && !AgentRuntime.busy && !importing
+        send.alpha = if (send.isEnabled) 1f else 0.4f
+        send.visibility = if (AgentRuntime.busy) View.GONE else View.VISIBLE
+        stop.visibility = if (AgentRuntime.busy) View.VISIBLE else View.GONE
         stop.isEnabled = AgentRuntime.busy
-        attachmentButton.text = if (AgentRuntime.attachments.isEmpty()) "＋ 图片" else "图片 × ${AgentRuntime.attachments.size}"
+        attachmentCount.text = if (importing) "正在导入…" else if (AgentRuntime.attachments.isEmpty()) "" else "${AgentRuntime.attachments.size} 张图片待发送"
         attachmentButton.isEnabled = AgentRuntime.ready && !AgentRuntime.busy && !importing
-        actions.forEach { it.isEnabled = AgentRuntime.ready && !AgentRuntime.busy && !importing }
+        actions.forEach { it.isEnabled = AgentRuntime.ready && !AgentRuntime.busy && !importing; it.alpha = if (it.isEnabled) 1f else 0.4f }
+        attachmentButton.alpha = if (attachmentButton.isEnabled) 1f else 0.4f
         val keepBottom = transcript.height - (scroll.scrollY + scroll.height) < dp(100)
         if (rendered.size > AgentRuntime.messages.size || rendered.indices.any { rendered[it].first !== AgentRuntime.messages[it] }) {
             rendered.clear(); transcript.removeAllViews()
         }
         if (AgentRuntime.messages.isEmpty()) {
             if (transcript.childCount == 0) transcript.addView(TextView(this).apply {
-                text = "你的随身代码助手\n\n在设置中填写模型服务地址和密钥，然后开始对话。\n\n通过“文件”导入文档，助手可以读取、编辑并保存到应用工作区。"
-                textSize = 16f; setTextColor(Color.rgb(99, 117, 120)); setPadding(dp(8), dp(40), dp(8), dp(24))
+                text = "今天想完成什么？\n\n用文字开始，或点 ＋ 添加图片和文件。\n模型服务可在右上角 ⋮ 中设置。"
+                textSize = 16f; gravity = Gravity.CENTER; setTextColor(Color.rgb(99, 117, 120)); setPadding(dp(8), dp(72), dp(8), dp(24))
             })
         } else {
             if (rendered.isEmpty()) transcript.removeAllViews()
@@ -190,6 +203,43 @@ class MainActivity : Activity() {
                 .setPositiveButton("允许") { _, _ -> AgentRuntime.approve(true) }
                 .setNegativeButton("拒绝") { _, _ -> AgentRuntime.approve(false) }.show()
         }
+    }
+
+    private fun showMore(anchor: View) {
+        val idle = AgentRuntime.ready && !AgentRuntime.busy && !importing
+        PopupMenu(this, anchor, Gravity.END).apply {
+            menu.add(0, 1, 0, "工作区文件").isEnabled = idle
+            menu.add(0, 2, 1, "模型设置").isEnabled = idle
+            menu.add(0, 3, 2, "工具与 MCP").isEnabled = idle
+            menu.add(0, 4, 3, "运行状态")
+            setOnMenuItemClickListener {
+                // Check again in case runtime state changed after opening the menu.
+                if (it.itemId != 4 && (!AgentRuntime.ready || AgentRuntime.busy || importing)) return@setOnMenuItemClickListener true
+                when (it.itemId) {
+                    1 -> files()
+                    2 -> settings()
+                    3 -> toolSettings()
+                    4 -> AlertDialog.Builder(this@MainActivity).setTitle("运行状态")
+                        .setMessage(AgentRuntime.status + "\n\n" + AgentRuntime.mcpStatus).setPositiveButton("关闭", null).show()
+                }
+                true
+            }
+            show()
+        }
+    }
+
+    private fun showAttachments() {
+        val labels = mutableListOf("添加图片", "导入文件", "工作区文件")
+        if (AgentRuntime.attachments.isNotEmpty()) labels.add("清空图片附件")
+        AlertDialog.Builder(this).setTitle("添加到对话").setItems(labels.toTypedArray()) { _, choice ->
+            when (choice) {
+                0 -> if (AgentRuntime.attachments.size >= 4) toast("最多 4 张图片")
+                    else startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type = "image/*" }, 12)
+                1 -> startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type = "*/*" }, 10)
+                2 -> files()
+                3 -> { AgentRuntime.attachments.clear(); render() }
+            }
+        }.setNegativeButton("取消", null).show()
     }
 
     private fun settings() {
