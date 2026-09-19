@@ -5,6 +5,7 @@ plugins {
 def runtimeAssets = layout.buildDirectory.dir('generated/agentAssets')
 tasks.register('prepareAgentAssets', Sync) {
     from 'src/main/assets'
+    from('../core/.api') { include 'xutils.lua'; into 'android/api' }
     into runtimeAssets
     exclude 'logs/**', '**/test_*.lua', 'scripts/xagent/gui.lua', 'scripts/xagent/ui/**'
 }

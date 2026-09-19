@@ -130,9 +130,12 @@ static void register_regex(lua_State *L) {
     lua_pop(L, 1);
 }
 
+#include "lua_task.h"
+
 void codua2a_install(lua_State *L) {
     register_regex(L);
     lua_newtable(L);
+    lua_pushcfunction(L, run_lua_task); lua_setfield(L, -2, "run_lua");
     lua_pushcfunction(L, poll_command); lua_setfield(L, -2, "poll");
     lua_pushcfunction(L, emit_event); lua_setfield(L, -2, "emit");
     lua_pushcfunction(L, check_path); lua_setfield(L, -2, "check_path");

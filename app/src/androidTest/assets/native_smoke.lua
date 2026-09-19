@@ -22,6 +22,42 @@ local function run()
     local result = process.run({ '/system/bin/sh', '-c', 'printf "hello 世界"; mkdir -p empty; rm -f outside; ln -s /data/local/tmp outside' }, host.workspace, 5000)
     assert(not result.is_error and result.content:find('hello 世界', 1, true), result.content)
     assert(not host.check_path('outside/test.txt'))
+    -- Execute scripts with the same restricted runtime advertised to the model.
+    local lua_tools = require('lua_tools').tools()
+    local api, runner = lua_tools[1], lua_tools[2]
+    assert(not runner.is_read_only())
+    assert(api.call({ topic = 'xutils' }).content:find('function xutils.json_pack', 1, true))
+    local script = [[
+        local u = require('xutils')
+        assert(io == nil and os == nil and debug == nil and package == nil and android_bridge == nil)
+        assert(u.get_config == nil and u.load_config == nil and u.scan_dir == nil)
+        assert(u.mkdir_p('lua-results'))
+        local rows = assert(u.json_unpack('[{"amount":2},{"amount":3}]'))
+        local sum = 0; for _, row in ipairs(rows) do sum = sum + row.amount end
+        fs.write_file('lua-results/结果.json', assert(u.json_pack({total=sum})))
+        assert(u.json_unpack(fs.read_file('lua-results/结果.json')).total == 5)
+        assert(u.stat('lua-results/结果.json').type == 'file')
+        assert(#u.list_dir('lua-results') >= 1)
+        assert(u.base64_decode(u.base64_encode('你好')) == '你好')
+        print('Lua total', sum, '你好 😀')
+    ]]
+    local executed = runner.call({ code = script }, { cwd = host.workspace })
+    assert(not executed.is_error and executed.content:find('Lua total\t5\t你好 😀', 1, true), executed.content)
+    local script_file = assert(io.open(host.workspace .. '/lua-results/job.lua', 'wb'))
+    script_file:write(script); script_file:close()
+    assert(not runner.call({ file_path = 'lua-results/job.lua' }, { cwd = host.workspace }).is_error)
+    assert(runner.call({ code = 'print(1)', file_path = 'x' }, {}).is_error)
+    assert(runner.call({ file_path = '../private.lua' }, {}).is_error)
+    for _, invalid in ipairs({
+        "fs.read_file('../private')", "fs.write_file('outside/secret', 'x')",
+        "xutils.mkdir_p('../bad')", "xutils.list_dir('/data/local/tmp')",
+        "require('xnet')", "while true do end", "print(string.rep('x', 40000))",
+        "local s = string.rep('x', 32 * 1024 * 1024)", "this is not Lua",
+    }) do
+        local result = runner.call({ code = invalid }, { cwd = host.workspace })
+        assert(result.is_error, 'Expected failure: ' .. invalid)
+    end
+    assert(not runner.call({ code = "print('still alive')" }, {}).is_error)
     local f = assert(io.open(host.workspace .. '/note.txt', 'wb')); f:write('hello 世界\nsecond line\n'); f:close()
     local tools = {}; for _, tool in ipairs(files.tools(function() return false end)) do tools[tool.name] = tool end
     assert(tools.LS.call({}, { cwd = host.workspace }).content:find('empty/', 1, true))

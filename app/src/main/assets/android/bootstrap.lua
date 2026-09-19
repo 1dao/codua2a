@@ -24,6 +24,7 @@ package.loaded['xagent.mcp.transport_http'] = require('mcp_transport')
 local mcp = require('mcp_manager')
 local process = require('process')
 local files = require('files')
+local lua_tools = require('lua_tools')
 local current, busy, pending, config
 local cancelled = false
 local approval_id = 0
@@ -65,6 +66,10 @@ if json.stat then
     for _, tool in ipairs(require('xagent.tools.file_ops').tools()) do registry.register(tool) end
 end
 
+if host.run_lua then
+    for _, tool in ipairs(lua_tools.tools()) do registry.register(tool) end
+end
+
 local function system_prompt()
     return 'You are Codua2a, a coding assistant running on Android. Reply in the user\'s language.\n'
         .. 'Workspace: ' .. workspace .. '\n'
@@ -72,7 +77,7 @@ local function system_prompt()
         .. 'Use native file tools for listing, searching, creating directories, copying, moving and deleting; these work without Shell or external commands. Write creates missing parent directories. '
         .. 'Shell is available only when the Bash tool is advertised; it uses Android sh. External development runtimes may be unavailable. '
         .. 'Use only advertised tools. Request approval for changes through the provided tools. '
-        .. 'Report only operations actually performed.\nDate: ' .. os.date('%Y-%m-%d')
+        .. 'Report only operations actually performed.\n' .. lua_tools.rules() .. '\nDate: ' .. os.date('%Y-%m-%d')
 end
 
 local function options()

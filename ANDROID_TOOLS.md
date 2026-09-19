@@ -15,6 +15,7 @@
 | DeletePath | Lua os.remove / xutils.rmtree，禁止删除工作区根 | 无 |
 | WebFetch | xnet HTTP/TLS + Lua HTML 文本提取 | 无，无需 curl |
 | MemoryWrite / TodoWrite / Skill | Lua 文件及会话逻辑 | 无 |
+| LuaApi / RunLua | 随包 API 文档 + 独立 Lua 状态执行脚本 | 无，无需 Python、Shell 或 lua 命令 |
 | MCP 工具及资源 | xnet HTTP/TLS + Lua JSON-RPC/SSE | 无，需配置远程服务 |
 | Bash（可选） | xproc 创建进程，xnet 异步读输出 | Android 系统 sh，命令本身须存在 |
 
@@ -22,6 +23,12 @@
 通用文件 API 的补充在上游 `FILESYSTEM_API.md` 中描述；Android 层负责工作区路径检查。
 
 ## 当前范围
+
+- Android 系统规则自动加载 `android/lua_rules.md`：数据计算、文本/JSON/CSV 转换和批量生成文件优先使用 Lua。
+- `LuaApi` 提供执行环境说明及来自 `core/.api/xutils.lua` 的原生签名；可用范围以 overview 为准。
+- `RunLua` 支持内联 `code` 或工作区 `file_path`，总是请求执行确认；支持基础 Lua、受限文件读写及 xutils JSON、哈希、编码、目录 API。
+- 每次独立状态，脚本不接触模型配置；文件路径沿用工作区校验。限制 64 KiB 脚本、16 MiB Lua 堆、200 万指令、32 KiB 输出、256 次文件操作及 8 MiB I/O。2 秒截止在 Lua 指令间检查，原生调用不能抢占，原生辅助内存不计入 Lua 堆限制。错误前的文件更改不回滚。
+- 当前脚本环境未开放 xnet/xthread、动态库、Shell、完整 io/os；网络使用 WebFetch 或 MCP。`.api` 存在不代表其全部模块已向脚本开放。
 
 - 原有内置工具均有 Android 入口；文件管理不需要启用 Shell。
 - Grep 是 POSIX 扩展正则，不承诺 ripgrep 的所有参数与 PCRE 功能。

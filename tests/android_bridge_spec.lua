@@ -10,7 +10,9 @@ function dofile(path)
     return result
 end
 local queue, events = {}, {}
+local lua_runs = 0
 android_bridge = {
+    run_lua = function(code) lua_runs = lua_runs + 1; return true, 'mock Lua output\n', '' end,
     workspace = base .. '/workspace',
     emit = function(raw) events[#events + 1] = assert(utils.json_unpack(raw)) end,
     poll = function() return table.remove(queue, 1) end,
@@ -104,6 +106,24 @@ local function run()
     check(not closed, 'defer socket release outside packet callback')
     net.tick()
     check(closed and next(net.active) == nil, 'completed model response releases a keep-alive socket')
+    local phase = 0
+    provider.stream_message = function(cfg, params, cb)
+        assert(params.system:find('Android scripting rules', 1, true))
+        local advertised = false
+        for _, tool in ipairs(params.tools) do if tool.name == 'RunLua' then advertised = true end end
+        assert(advertised)
+        phase = phase + 1
+        local blocks = phase % 2 == 1 and { { type = 'tool_use', id = 'lua-' .. phase, name = 'RunLua', input = { code = 'print(42)' } } }
+            or { { type = 'text', text = 'done' } }
+        cb.on_done({ message = { role = 'assistant', content = blocks }, usage = {}, stop_reason = phase % 2 == 1 and 'tool_use' or 'end_turn' })
+    end
+    send({ action = 'new' }); send({ action = 'submit', text = 'run Lua' })
+    check(last('confirm').name == 'RunLua' and lua_runs == 0, 'Lua waits for approval with rules and schema advertised')
+    send({ action = 'confirm', id = last('confirm').id, allow = false })
+    check(lua_runs == 0 and last('tool_result').result.is_error, 'denied Lua never executes')
+    send({ action = 'submit', text = 'run Lua with approval' })
+    send({ action = 'confirm', id = last('confirm').id, allow = true })
+    check(lua_runs == 1 and not last('tool_result').result.is_error, 'approved Lua output returns to model')
 end
 return {
     __init = function()
