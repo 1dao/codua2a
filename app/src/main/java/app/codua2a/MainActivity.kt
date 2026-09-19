@@ -60,6 +60,8 @@ class MainActivity : Activity() {
         pendingCapture = savedInstanceState?.getString("pendingCapture")?.let { android.net.Uri.parse(it) }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            // Accept focus when dismissing the composer so EditText cannot reclaim it.
+            isFocusableInTouchMode = true
             setPadding(dp(12), dp(6), dp(12), dp(8))
             setBackgroundColor(Color.rgb(243, 247, 246))
         }
@@ -127,7 +129,11 @@ class MainActivity : Activity() {
         stop = iconButton("stop", "停止任务", true) { AgentRuntime.send(JSONObject().put("action", "cancel")) }
         send = iconButton("send", "发送消息", true) {
             if (!AgentRuntime.configured) settings()
-            else if (AgentRuntime.submit(input.text.toString().trim())) { input.text.clear(); AgentRuntime.draft = ""; setAttachmentsExpanded(false) }
+            else if (AgentRuntime.submit(input.text.toString().trim())) {
+                dismissInputKeyboard()
+                input.text.clear(); AgentRuntime.draft = ""
+                setAttachmentsExpanded(false)
+            }
         }
         controls.addView(stop, LinearLayout.LayoutParams(dp(48), dp(48)))
         controls.addView(send, LinearLayout.LayoutParams(dp(48), dp(48)))
@@ -285,12 +291,16 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun dismissInputKeyboard() {
+        (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+            .hideSoftInputFromWindow(input.windowToken, 0)
+        input.clearFocus()
+        page.requestFocus()
+    }
+
     private fun showAttachments() {
         val expand = attachmentPanel.visibility != View.VISIBLE
-        if (expand) {
-            input.clearFocus()
-            (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(input.windowToken, 0)
-        }
+        if (expand) dismissInputKeyboard()
         setAttachmentsExpanded(expand)
     }
 
