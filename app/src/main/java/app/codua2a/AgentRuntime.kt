@@ -144,7 +144,8 @@ object AgentRuntime {
             }
             "assistant" -> { streaming = null }
             "truncated_retry" -> { streaming?.let { messages.remove(it) }; streaming = null }
-            "tool_use" -> { streaming = null; add("工具 · ${e.optString("name")}", e.optJSONObject("input")?.toString(2).orEmpty()) }
+            "tool_use_start" -> { status = "正在生成 ${e.optString("name")} 参数…" }
+            "tool_use" -> { streaming = null; status = "准备执行 ${e.optString("name")}…"; add("工具 · ${e.optString("name")}", e.optJSONObject("input")?.toString(2).orEmpty()) }
             "tool_result" -> add("结果 · ${e.optString("name")}", e.optJSONObject("result")?.optString("content").orEmpty().take(6000))
             "confirm" -> { pendingApproval = e; status = "等待工具操作确认" }
             "busy" -> {

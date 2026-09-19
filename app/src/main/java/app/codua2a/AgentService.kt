@@ -23,7 +23,8 @@ class AgentService : Service() {
         fun begin(context: Context) { context.startForegroundService(Intent(context, AgentService::class.java)) }
     }
     private fun notification(): Notification {
-        val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val stop = PendingIntent.getService(this, 1, Intent(this, AgentService::class.java).setAction("stop"), PendingIntent.FLAG_IMMUTABLE)
         return Notification.Builder(this, "agent-tasks").setSmallIcon(R.drawable.ic_launcher)
             .setContentTitle("codua 正在处理任务").setContentText(AgentRuntime.status.take(120))

@@ -38,6 +38,7 @@ class MainActivity : Activity() {
     private var approvalId = -1
     private var exportFile: File? = null
     private var importing = false
+    private val runtimeListener: () -> Unit = { render() }
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
     private fun shape(color: Int) = GradientDrawable().apply { setColor(color); cornerRadius = dp(14).toFloat() }
     private fun iconButton(icon: String, label: String, filled: Boolean = false, block: () -> Unit) = ImageButton(this).apply {
@@ -173,10 +174,14 @@ class MainActivity : Activity() {
         AgentRuntime.start(applicationContext)
     }
 
-    override fun onStart() { super.onStart(); AgentRuntime.listener = { render() }; render() }
+    override fun onStart() { super.onStart(); AgentRuntime.listener = runtimeListener; render() }
     override fun onStop() {
-        AgentRuntime.draft = input.text.toString()
-        AgentRuntime.listener = null
+        // A replacement Activity can start before this one's onStop runs.
+        // Only detach our own listener, never the new screen's approval updates.
+        if (AgentRuntime.listener === runtimeListener) {
+            AgentRuntime.draft = input.text.toString()
+            AgentRuntime.listener = null
+        }
         approvalDialog?.dismiss(); approvalDialog = null; approvalId = -1
         super.onStop()
     }

@@ -13,6 +13,7 @@ class NativeRuntimeTest : Instrumentation() {
             when (mode) {
                 "ui" -> UiRuntimeChecks.run(this)
                 "compose" -> ComposerChecks.run(this)
+                "approval" -> ApprovalChecks.run(this)
                 else -> testNativeTools()
             }
             finish(Activity.RESULT_OK, Bundle().apply { putString("stream", "$mode checks passed") })
