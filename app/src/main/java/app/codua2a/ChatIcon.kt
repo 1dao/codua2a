@@ -32,6 +32,19 @@ class ChatIcon(private val icon: String, color: Int) : Drawable() {
             }
             "more" -> { paint.style = Paint.Style.FILL; for (y in listOf(5f, 12f, 19f)) canvas.drawCircle(12f, y, 1.6f, paint) }
             "plus" -> { line(5f, 12f, 19f, 12f); line(12f, 5f, 12f, 19f) }
+            "close" -> { line(6f, 6f, 18f, 18f); line(6f, 18f, 18f, 6f) }
+            "camera" -> {
+                canvas.drawPath(Path().apply { moveTo(3f, 7f); lineTo(7f, 7f); lineTo(9f, 4f); lineTo(15f, 4f); lineTo(17f, 7f); lineTo(21f, 7f); lineTo(21f, 20f); lineTo(3f, 20f); close() }, paint)
+                canvas.drawCircle(12f, 13f, 4f, paint)
+            }
+            "image" -> {
+                canvas.drawRoundRect(3f, 3f, 21f, 21f, 3f, 3f, paint); canvas.drawCircle(8f, 8f, 1.5f, paint)
+                canvas.drawPath(Path().apply { moveTo(4f, 18f); lineTo(10f, 12f); lineTo(15f, 17f); lineTo(18f, 14f); lineTo(21f, 17f) }, paint)
+            }
+            "file" -> {
+                canvas.drawPath(Path().apply { moveTo(6f, 3f); lineTo(14f, 3f); lineTo(19f, 8f); lineTo(19f, 21f); lineTo(6f, 21f); close(); moveTo(14f, 3f); lineTo(14f, 8f); lineTo(19f, 8f) }, paint)
+                line(9f, 12f, 16f, 12f); line(9f, 16f, 16f, 16f)
+            }
             "send" -> { line(12f, 19f, 12f, 5f); line(6f, 11f, 12f, 5f); line(12f, 5f, 18f, 11f) }
             "stop" -> { paint.style = Paint.Style.FILL; canvas.drawRoundRect(6f, 6f, 18f, 18f, 2f, 2f, paint) }
         }

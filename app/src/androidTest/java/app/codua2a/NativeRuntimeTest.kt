@@ -10,7 +10,11 @@ class NativeRuntimeTest : Instrumentation() {
     override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); mode = arguments?.getString("mode") ?: "native"; start() }
     override fun onStart() {
         try {
-            if (mode == "ui") UiRuntimeChecks.run(this) else testNativeTools()
+            when (mode) {
+                "ui" -> UiRuntimeChecks.run(this)
+                "compose" -> ComposerChecks.run(this)
+                else -> testNativeTools()
+            }
             finish(Activity.RESULT_OK, Bundle().apply { putString("stream", "$mode checks passed") })
         }
         catch (error: Throwable) { finish(Activity.RESULT_CANCELED, Bundle().apply { putString("stream", error.stackTraceToString()) }) }

@@ -22,6 +22,8 @@ object AgentRuntime {
     var ready = false; private set
     var busy = false; private set
     var configured = false; private set
+    var modelName = "选择模型"; private set
+    var modelChanging = false; private set
     var status = "正在启动 Lua 引擎…"; private set
     var pendingApproval: JSONObject? = null; private set
     var sessions: org.json.JSONArray? = null
@@ -70,10 +72,18 @@ object AgentRuntime {
     }
 
     fun submit(text: String): Boolean {
-        if (busy || !configured || text.isBlank()) return false
+        if (busy || modelChanging || !configured || text.isBlank()) return false
         AgentService.begin(context)
         val sent = send(JSONObject().put("action", "submit").put("text", text).put("images", org.json.JSONArray(attachments)))
         if (sent) { attachments.clear(); busy = true; status = "正在思考…"; notifyUi() }
+        return sent
+    }
+
+    fun configureModel(config: JSONObject): Boolean {
+        if (!ready || busy || modelChanging) return false
+        val profile = ModelProfiles.selected(ModelProfiles.normalize(config)) ?: return false
+        val sent = send(JSONObject().put("action", "configure").put("config", profile))
+        if (sent) { modelChanging = true; notifyUi() }
         return sent
     }
 
@@ -115,11 +125,11 @@ object AgentRuntime {
                 ready = true; status = "就绪 · 请配置模型"
                 try { SecureSettings(context).load()?.let {
                     configureTools(it, false)
-                    if (it.has("model")) send(JSONObject().put("action", "configure").put("config", it))
+                    if (it.has("model")) configureModel(it)
                 } }
                 catch (_: Exception) { status = "无法解密原配置，请在设置中重新保存" }
             }
-            "configured" -> { configured = true; status = "就绪 · ${e.optString("model")}" }
+            "configured" -> { configured = true; modelChanging = false; modelName = e.optString("model"); status = "就绪 · $modelName" }
             "mcp_status" -> {
                 val servers = e.optJSONArray("servers")
                 mcpStatus = if (servers == null || servers.length() == 0) "未配置 MCP 服务器" else
@@ -143,7 +153,7 @@ object AgentRuntime {
             }
             "done" -> { streaming = null; status = "完成 · ${e.optString("stop_reason")}" }
             "status" -> { status = e.optString("text") }
-            "error" -> { add("错误", e.optString("error")); status = "操作失败" }
+            "error" -> { modelChanging = false; add("错误", e.optString("error")); status = "操作失败" }
             "sessions" -> { sessions = e.optJSONArray("items") }
             "session" -> {
                 messages.clear(); streaming = null

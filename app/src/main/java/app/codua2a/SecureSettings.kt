@@ -29,13 +29,13 @@ class SecureSettings(context: Context) {
         require(parts.size == 2) { "Invalid saved settings" }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP)))
-        return JSONObject(String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), Charsets.UTF_8))
+        return ModelProfiles.normalize(JSONObject(String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), Charsets.UTF_8)))
     }
     fun save(config: JSONObject) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key())
         val iv = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)
-        val data = Base64.encodeToString(cipher.doFinal(config.toString().toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
+        val data = Base64.encodeToString(cipher.doFinal(ModelProfiles.normalize(config).toString().toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
         check(preferences.edit().putString("encrypted", "$iv:$data").commit()) { "Cannot save settings" }
     }
 }
